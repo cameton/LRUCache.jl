@@ -139,12 +139,13 @@ function _unsafe_addindex!(lru::LRU{K}, v, key) where K
     lru.currentsize += s
     lru.dict[key] = (v, n, s)
 end
-function Base.setindex!(lru::LRU{K, V}, v, key) where {K, V}
+
+function Base.setindex!(lru::LRU{K, V}, v, key; dofinalize = true) where {K, V}
     evictions = Tuple{K, V}[]
     lock(lru.lock) do
         if _unsafe_haskey(lru, key)
             old_v, n, s = lru.dict[key]
-            if lru.finalizer !== nothing
+            if dofinalize && lru.finalizer !== nothing
                 push!(evictions, (key, old_v))
             end
             lru.currentsize -= s
@@ -184,35 +185,35 @@ function Base.resize!(lru::LRU{K, V}; maxsize::Integer = lru.maxsize) where {K, 
     return lru
 end
 
-function Base.delete!(lru::LRU{K, V}, key) where {K, V}
+function Base.delete!(lru::LRU{K, V}, key; dofinalize = true) where {K, V}
     v = lock(lru.lock) do
         v, n, s = pop!(lru.dict, key)
         lru.currentsize -= s
         _delete!(lru.keyset, n)
         return v
     end
-    if lru.finalizer !== nothing
+    if dofinalize && lru.finalizer !== nothing
         lru.finalizer(key, v)
     end
     return lru
 end
-function Base.pop!(lru::LRU{K, V}, key) where {K, V}
+function Base.pop!(lru::LRU{K, V}, key; dofinalize = true) where {K, V}
     (key, v) = lock(lru.lock) do
         v, n, s = pop!(lru.dict, key)
         lru.currentsize -= s
         _delete!(lru.keyset, n)
         return (key, v)
     end
-    if lru.finalizer !== nothing
+    if dofinalize && lru.finalizer !== nothing
         lru.finalizer(key, v)
     end
     return v
 end
 
-function Base.empty!(lru::LRU{K, V}) where {K, V}
+function Base.empty!(lru::LRU{K, V}; dofinalize = true) where {K, V}
     evictions = Tuple{K, V}[]
     lock(lru.lock) do
-        if lru.finalizer === nothing
+        if !dofinalize || lru.finalizer === nothing
             lru.currentsize = 0
             empty!(lru.dict)
             empty!(lru.keyset)
